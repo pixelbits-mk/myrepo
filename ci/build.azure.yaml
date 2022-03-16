@@ -1,0 +1,73 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  - name: isMain
+    value: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+  - group: GCLOUD_SERVICE_KEY_STAGING
+  - group: AZURE_DEVOPS_EXT_PAT
+  - name: apps
+    value: ''
+  - name: YARN_CACHE_FOLDER
+    value: $(Pipeline.Workspace)/.yarn
+  - name: NODE_MODULES_FOLDER
+    value: $(Build.SourcesDirectory)/node_modules
+
+jobs:
+  - job: Build
+    container: registry.hub.docker.com/ubuntu:latest
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      # - script: |
+      #     echo $(GCLOUD_SERVICE_KEY) | base64 --decode | gcloud auth activate-service-account --key-file=-
+      #     gcloud auth print-access-token  > FIREBASE_TOKEN
+      #   displayName: GCloud Auth
+
+      # Some packages e.g. cypress rely on artifacts from the .yarn cache
+      - task: Cache@2
+        inputs:
+          key: '"yarn" | "$(Agent.OS)" | yarn.lock'
+          restoreKeys: yarn | "$(Agent.OS)"
+          path: $(YARN_CACHE_FOLDER)
+        displayName: Cache yarn
+
+      # Most packages just rely on the built node_modules
+      - task: Cache@2
+        inputs:
+          key: '"node_modules" | "$(Agent.OS)" | yarn.lock'
+          restoreKeys: node_modules | "$(Agent.OS)"
+          path: $(NODE_MODULES_FOLDER)
+          cacheHitVar: CACHE_RESTORED
+        displayName: Cache node_modules
+
+      - script: yarn --frozen-lockfile
+        condition: eq(variables.CACHE_RESTORED, 'false')
+
+      # - script: ./ci/build-affected-apps.sh build
+      #   displayName: NX Build
+
+      # - script: |
+      #     mkdir dist/$(Build.BuildId)
+      #     for APP in $(ls dist/apps); do
+      #       tar -czvf "dist/$(Build.BuildId)/${APP}.tar.gz" "dist/apps/${APP}"
+      #     done
+      #   displayName: Archive Artifacts
+      #   condition: and(succeeded(), eq(variables.ismain, true), ne(variables.apps, ''))
+
+      # - upload: dist/$(Build.BuildId)
+      #   condition: and(succeeded(), eq(variables.isMain, true), ne(variables.apps, ''))
+      #   name: artifact
+      #   displayName: Upload Artifacts
+
+      # - script: ./ci/build-affected-apps.sh update-build-id
+      #   condition: and(succeeded(), eq(variables.ismain, true), ne(variables.apps, ''))
+      #   displayName: Update Latest Build Pointer
+
+      # - script: ./ci/trigger-azure-releases.sh pipeline $(Build.BuildId) $(apps) $(Build.BuildNumber)
+      #   condition: and(succeeded(), eq(variables.ismain, true), ne(variables.apps, ''))
+      #   displayName: Trigger Releases
+      #   env:
+      #     AZURE_DEVOPS_EXT_PAT: $(AZURE_DEVOPS_EXT_PAT)
